@@ -1,0 +1,196 @@
+---
+title: "R&D"
+author: "Hussain Alsalman"
+date: "3/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("tasi")
+library("dplyr")
+library("quantmod")
+library("purrr")
+library("PerformanceAnalytics")
+library("highcharter")
+library("lcyanalysis")
+data("stock_indices")
+
+```
+
+## System requirements 
+# 1 - Daily download of all data stock market
+# 2 - Scan all data to identify trends  
+
+
+# Information 
+*primary trend* (timeframe : Years)
+##Bull Trend 
+It has three phases 
+## Phase 1: 
+reviving confidence from the prior primary bear market
+## Phase 2: 
+the second represents the response to increased corporate earnings
+## Phase 3: 
+third is when speculation becomes dominant and prices rise on “hopes and expectations.”
+
+##Bear Trend 
+It has three phases 
+## Phase 1: 
+abandonment of hopes upon which stocks were purchased
+## Phase 2: 
+selling due to decreased earnings
+## Phase 3: 
+distress selling, regardless of value, by those who believe the worst is yet to come or who are forced to liquidate
+
+## Measuring Market Strength 
+We can use advance decline line chart to determine the strength of a specific market 
+
+```{r}
+material_comp <-  stock_indices %>%
+  filter(sectorName == "Materials") %>% 
+  select(symbol,companyName) %>% 
+  as.data.frame() 
+```
+
+```{r}
+symbols <- material_comp[,1]
+names(symbols) <-  material_comp[,2]
+mat_prices <- data.frame()
+stocks_list <- list()
+for (i in 1:length(symbols)){
+  stocks_list[[i]] <- getCompanyRecords(startDate = "2018-12-31",endDate = "2021-04-01",as.numeric(symbols[i]))
+}
+names(stocks_list) <- material_comp[, 2]
+```
+
+```{r}
+# Convert to xts format
+stocks_list_xts<-purrr::map(stocks_list, df_to_xts)
+mrk_brdth<- stocks_list_xts %>%
+  map(function(x) {x$change <- x$Close - x$Open;
+                   x$ad <- ifelse(x$change > 0 , 1, -1)
+                  return(x)})  %>% 
+map(function(x) x$ad) %>% 
+  pmap(sum) %>%
+  flatten_dbl() %>% 
+  cumsum() %>% 
+  as.xts(order.by = index(stocks_list_xts[["Basic Chemical Industries Co."]]))
+  
+add_TA(mrk_brdth)
+chart_Series(stocks_list_xts[["Basic Chemical Industries Co."]])
+add_TA(downtrend(stocks_list_xts[["Basic Chemical Industries Co."]],day = 20,num = 2),on = TRUE, col = "red")
+add_TA(uptrend(stocks_list_xts[["Basic Chemical Industries Co."]],day = 20,num = 2),on = TRUE, col = "green")
+
+
+highchart(type = "stock") %>%
+  hc_title(text = "Market breadth") %>%
+     hc_yAxis_multiples(
+    list(lineWidth = 3),
+    list(showLastLabel = TRUE, opposite = TRUE)
+  ) %>% 
+  hc_add_series(mrk_brdth) %>% 
+  hc_add_series(stocks_list_xts[["Basic Chemical Industries Co."]],yAxis = 1) %>% 
+    hc_add_series(stocks_list_xts[["Takween Advanced Industries Co."]],yAxis = 1) %>% 
+    hc_add_series(stocks_list_xts[["Saudi Kayan Petrochemical Co."]],yAxis = 1) %>% 
+      hc_legend(
+    align = "left",
+    verticalAlign = "top",
+    layout = "vertical",
+    x = 0,
+    y = 100
+    )
+    
+
+```
+
+
+# Select Random stocks for REITs
+comps <- stock_indices %>%
+  filter(sectorName == "Materials") %>% 
+  select(symbol,companyName) %>% 
+  as.data.frame() 
+
+
+# Random sample of 5 Tickers & extracting their names
+sample_n<- sample(1:dim(comps)[1],5)  
+symbols <- comps[sample_n,1]
+names(symbols) <-  comps[sample_n,2]
+
+prices <- data.frame()
+stocks_list <- list()
+for (i in 1:length(symbols)){
+  stocks_list[[i]] <- getCompanyRecords(startDate = "2018-12-31",endDate = "2021-03-22",as.numeric(symbols[i]))
+}
+# Retain the names of the tickers
+
+strptime(Sys.time(), format = "yy")
+#Convert them to xts 
+stocks_list_xts<-purrr::map(stocks_list, df_to_xts)
+
+monthly_prices <- stocks_list %>%
+  map(df_to_xts) %>% 
+  map(~Cl(.)) %>% 
+  reduce(merge) %>% 
+  na.omit() %>% 
+  to.monthly(OHLC = FALSE, 
+             indexAt = "lastof") 
+
+asset_returns_xts <-
+  Return.calculate(monthly_prices,
+                   method = "log") %>%
+  na.omit()
+colnames(monthly_prices) <-  comps[sample_n, 2]  
+
+ymam <- getCompanyRecords(startDate = "2020-01-01", endDate = "2021-03-22", 3020)
+ymam_xts <- df_to_xts(ymam)
+library("lcyanalysis")
+
+quantmod::chart_Series(ymam_xts)
+m_signals_riyad <- lcyanalysis::uptrend(ymam_xts, day = 20,num = 1)
+quantmod::add_TA(x = m_signals_riyad, on = TRUE, col = "green")
+
+
+highchart(type = "stock") %>%
+  hc_title(text = "Monthly Log Returns") %>%
+  hc_add_series(asset_returns_xts[, 1],
+                name = comps[sample_n, 2][1]) %>%
+  hc_add_series(asset_returns_xts[, 2],
+                name = comps[sample_n, 2][2]) %>%
+  hc_add_series(asset_returns_xts[, 3],
+                name = comps[sample_n, 2][3]) %>%
+  hc_add_series(asset_returns_xts[, 4],
+                name = comps[sample_n, 2][4]) %>%
+  hc_add_series(asset_returns_xts[, 5],
+                name =  comps[sample_n, 2][5]) %>%
+  hc_add_theme(hc_theme_flat()) %>%
+  hc_navigator(enabled = FALSE) %>%
+  hc_scrollbar(enabled = FALSE) %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_legend(enabled = TRUE)
+
+w <- c(0.25,
+       0.25,
+       0.20,
+       0.20,
+       0.10)
+
+portfolio_returns_xts_rebalanced_monthly <-
+  Return.portfolio(asset_returns_xts,
+                   weights = w,
+                   rebalance_on = "months") %>%
+  `colnames<-`("returns")
+
+highchart(type = "stock") %>%
+  hc_title(text = "Portfolio Monthly Returns") %>%
+  hc_add_series(portfolio_returns_xts_rebalanced_monthly$returns,
+                name = "Rebalanced Monthly",
+                color = "cornflowerblue") %>%
+  hc_add_theme(hc_theme_flat()) %>%
+  hc_navigator(enabled = FALSE) %>%
+  hc_scrollbar(enabled = FALSE) %>%
+  hc_legend(enabled = TRUE) %>%
+  hc_exporting(enabled = TRUE)
+
+system.file("company_symbols","tasi")
+
